@@ -684,6 +684,42 @@ variable adam-v   \ second moment buffer (floats)
     buf pos type cr
   loop ;
 
+: inference-hi
+  cr ." --- inference (seed: hi) ---" cr
+  reset-pool
+  BOS_TOKEN { tok }
+  pad 0 { buf pos }
+  s" hi" { seed slen }
+
+  \ Prime KV cache using seed characters.
+  slen 0 do
+    seed i + c@ char>tok { st }
+    st 0< if leave then
+    tok pos gpt-forward drop
+    st to tok
+    seed i + c@ buf pos + c!
+    pos 1+ to pos
+    pos BLOCK_SIZE >= if leave then
+  loop
+
+  \ Continue generation after seed.
+  BLOCK_SIZE pos ?do
+    tok i gpt-forward { logits }
+    VOCAB_SIZE cells pool-alloc { scaled }
+    VOCAB_SIZE 0 do
+      logits i cells + @
+      TEMPERATURE new-val val/
+      scaled i cells + !
+    loop
+    scaled VOCAB_SIZE nn-softmax { probs }
+    probs sample-token to tok
+    tok BOS_TOKEN = if leave then
+    uchars tok + c@ buf pos + c!
+    pos 1+ to pos
+  loop
+
+  ." reply: " buf pos type cr ;
+
 \ ============================================================
 \ Section 13: Main
 \ ============================================================
@@ -697,7 +733,7 @@ variable adam-v   \ second moment buffer (floats)
   init-params
   init-adam
   train
-  inference
+  inference-hi
   bye ;
 
 main
