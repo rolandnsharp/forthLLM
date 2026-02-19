@@ -1,0 +1,10 @@
+# Generated / large local data
+input.txt
+training_data/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs
+*.log

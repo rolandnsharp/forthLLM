@@ -9,21 +9,82 @@ Everything else is just efficiency.
 import os       # os.path.exists
 import math     # math.log, math.exp
 import random   # random.seed, random.choices, random.gauss, random.shuffle
+import re       # regex for text cleanup
 random.seed(42) # Let there be order among chaos
 
 # Let there be a Dataset `docs`: list[str] of documents (e.g. a list of names)
-if not os.path.exists('input.txt'):
-    import urllib.request
-    names_url = 'https://raw.githubusercontent.com/karpathy/makemore/988aa59/names.txt'
-    urllib.request.urlretrieve(names_url, 'input.txt')
-docs = [line.strip() for line in open('input.txt') if line.strip()]
+def load_docs():
+    td = 'training_data'
+    if os.path.isdir(td):
+        text_chunks = []
+        for fn in sorted(os.listdir(td)):
+            if fn.endswith('.txt'):
+                with open(os.path.join(td, fn), 'r', encoding='utf-8', errors='ignore') as f:
+                    text_chunks.append(f.read().lower())
+        text = '\n'.join(text_chunks)
+        words = re.findall(r"[a-z']+", text)
+        docs = [w for w in words if 3 <= len(w) <= 18]
+        return docs[:30000]
+    if not os.path.exists('input.txt'):
+        import urllib.request
+        names_url = 'https://raw.githubusercontent.com/karpathy/makemore/988aa59/names.txt'
+        urllib.request.urlretrieve(names_url, 'input.txt')
+    return [line.strip() for line in open('input.txt') if line.strip()]
+
+docs = load_docs()
 random.shuffle(docs)
 print(f"num docs: {len(docs)}")
 
-# Let there be a Tokenizer to translate strings to sequences of integers ("tokens") and back
-uchars = sorted(set(''.join(docs))) # unique characters in the dataset become token ids 0..n-1
-BOS = len(uchars) # token id for a special Beginning of Sequence (BOS) token
-vocab_size = len(uchars) + 1 # total number of unique tokens, +1 is for BOS
+# Let there be a BPE tokenizer
+def get_pair_counts(token_docs):
+    counts = {}
+    for toks in token_docs:
+        for i in range(len(toks) - 1):
+            p = (toks[i], toks[i + 1])
+            counts[p] = counts.get(p, 0) + 1
+    return counts
+
+def apply_merge(tokens, pair, merged):
+    out = []
+    i = 0
+    while i < len(tokens):
+        if i + 1 < len(tokens) and tokens[i] == pair[0] and tokens[i + 1] == pair[1]:
+            out.append(merged)
+            i += 2
+        else:
+            out.append(tokens[i])
+            i += 1
+    return out
+
+def train_bpe(docs, max_vocab=256):
+    token_docs = [list(doc) for doc in docs]
+    vocab = set(ch for doc in docs for ch in doc)
+    merges = []
+    while len(vocab) < max_vocab:
+        pair_counts = get_pair_counts(token_docs)
+        if not pair_counts:
+            break
+        pair, freq = max(pair_counts.items(), key=lambda kv: kv[1])
+        if freq < 2:
+            break
+        merged = pair[0] + pair[1]
+        merges.append((pair, merged))
+        vocab.add(merged)
+        token_docs = [apply_merge(toks, pair, merged) for toks in token_docs]
+    return sorted(vocab), merges
+
+def bpe_encode(text, merges):
+    toks = list(text)
+    for pair, merged in merges:
+        toks = apply_merge(toks, pair, merged)
+    return toks
+
+vocab, merges = train_bpe(docs, max_vocab=256)
+stoi = {tok: i for i, tok in enumerate(vocab)}
+itos = {i: tok for tok, i in stoi.items()}
+
+BOS = len(vocab) # token id for a special Beginning of Sequence (BOS) token
+vocab_size = len(vocab) + 1 # total number of unique tokens, +1 is for BOS
 print(f"vocab size: {vocab_size}")
 
 # Let there be Autograd to recursively apply the chain rule through a computation graph
@@ -149,12 +210,13 @@ m = [0.0] * len(params) # first moment buffer
 v = [0.0] * len(params) # second moment buffer
 
 # Repeat in sequence
-num_steps = 120 # number of training steps
+num_steps = 100 # number of training steps
 for step in range(num_steps):
 
-    # Take single document, tokenize it, surround it with BOS special token on both sides
+    # Take single document, BPE tokenize it, surround it with BOS special token on both sides
     doc = docs[step % len(docs)]
-    tokens = [BOS] + [uchars.index(ch) for ch in doc] + [BOS]
+    token_strs = bpe_encode(doc, merges)
+    tokens = [BOS] + [stoi[t] for t in token_strs] + [BOS]
     n = min(block_size, len(tokens) - 1)
 
     # Forward the token sequence through the model, building up the computation graph all the way to the loss
@@ -192,12 +254,12 @@ for sample_idx in range(10):
     seed = ''.join(random.choice(letters) for _ in range(seed_len))
     keys, values = [[] for _ in range(n_layer)], [[] for _ in range(n_layer)]
     token_id = BOS
-    sample = list(seed)
+    sample = seed
     pos_id = 0
     # Prime the KV cache with the seed prefix.
-    for ch in seed:
+    seed_toks = [stoi[t] for t in bpe_encode(seed, merges) if t in stoi]
+    for token_id in seed_toks:
         logits = gpt(token_id, pos_id, keys, values)
-        token_id = uchars.index(ch) if ch in uchars else BOS
         pos_id += 1
         if pos_id >= block_size:
             break
@@ -207,6 +269,6 @@ for sample_idx in range(10):
         token_id = random.choices(range(vocab_size), weights=[p.data for p in probs])[0]
         if token_id == BOS:
             break
-        sample.append(uchars[token_id])
+        sample += itos[token_id]
         pos_id += 1
     print(f"sample {sample_idx+1:2d} | input={seed} | output={''.join(sample)}")
