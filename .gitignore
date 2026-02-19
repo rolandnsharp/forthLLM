@@ -2,9 +2,5 @@
 input.txt
 training_data/
 
-# Python cache
-__pycache__/
-*.pyc
-
 # Logs
 *.log
