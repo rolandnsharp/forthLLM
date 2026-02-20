@@ -1,6 +1,8 @@
 # Generated / large local data
 input.txt
 training_data/
+dist/
+node_modules/
 
 # Logs
 *.log
