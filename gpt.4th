@@ -2,15 +2,15 @@
 \ Usage: gforth gpt.4th
 
 \ === Config ===
-1 constant N_LAYER
-8 constant N_EMBD
-8 constant BLOCK_SIZE
-2 constant N_HEAD
+2 constant N_LAYER
+16 constant N_EMBD
+16 constant BLOCK_SIZE
+4 constant N_HEAD
 N_EMBD N_HEAD / constant HEAD_DIM
-200 constant NUM_STEPS
+16000 constant NUM_STEPS
 257 constant MAX_VOCAB
 200000 constant MAX_DOCS
-300000 constant MAX_NODES
+2000000 constant MAX_NODES
 
 \ === RNG ===
 variable rng-state  42 rng-state !
@@ -164,7 +164,7 @@ variable bk-node
   loop ;
 
 \ === Dataset ===
-8000000 allocate throw constant text-buf
+16000000 allocate throw constant text-buf
 variable text-ptr  0 text-ptr !
 MAX_DOCS cells allocate throw constant doc-addr
 MAX_DOCS cells allocate throw constant doc-len
@@ -435,22 +435,24 @@ variable v-step
       lrt f* fnegate
       i floats nd-data + dup f@ fswap f+ f!
     loop
-    ." step " v-step @ 1+ 4 .r ."  / " NUM_STEPS 4 .r ."  | loss "
-    loss-node @ nd@ f. cr
+    v-step @ 1+ dup 100 mod 0= swap NUM_STEPS = or if
+      ." step " v-step @ 1+ 5 .r ."  / " NUM_STEPS 5 .r ."  | loss "
+      loss-node @ nd@ f. cr
+    then
   loop ;
 
 \ === Inference ===
 : generate ( -- )
-  ." --- inference (sacred text hallucinations) ---" cr
-  20 0 ?do
+  ." --- sacred text hallucinations ---" cr cr
+  30 0 ?do
     params-end @ nodes-used !
     bos-token @ { curtok }
-    ." sample " i 1+ 2 .r ." : "
+    ." [" i 1+ 2 .r ." ] "
     BLOCK_SIZE 0 ?do
       curtok i gpt-forward
       vocab-size @ 0 ?do
         buf-logits i cells + @ nd@
-        0.5e0 f/ val buf-logits i cells + !
+        0.7e0 f/ val buf-logits i cells + !
       loop
       buf-logits vocab-size @ nn-softmax
       rng-float { f: r }
